@@ -2,95 +2,84 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import superjson from "superjson";
 import { db } from "@/shared/lib/db";
-import { zkLoginSessions, walletSessions, users } from "@/shared/db/schema";
-import { eq } from "drizzle-orm";
+import { users } from "@/shared/db/schema";
+
+/**
+ * Single-user local mode.
+ *
+ * zkLogin / wallet / Enoki auth has been removed. Every request runs as one
+ * fixed local user, and all Walrus Memory operations use the shared delegate
+ * key + account from the environment (MEMWAL_PRIVATE_KEY / MEMWAL_ACCOUNT_ID).
+ */
+const LOCAL_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 export type Context = {
   db: typeof db;
   userId: string | null;
-  /** Per-user Walrus Memory delegate key (null if user has no stored key). */
+  /** Walrus Memory delegate key (from env). */
   memwalKey: string | null;
-  /** Per-user Walrus Memory account ID (null if user has no stored account). */
+  /** Walrus Memory account ID (from env). */
   memwalAccountId: string | null;
 };
 
-function getSessionIdFromRequest(req: Request): string | null {
-  return req.headers.get("x-session-id");
-}
-
-/** Load user's Walrus Memory delegate key from the users table. Falls back to env vars. */
-async function loadUserMemwalKey(userId: string) {
-  try {
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    return {
-      memwalKey: user?.delegatePrivateKey ?? process.env.MEMWAL_PRIVATE_KEY ?? null,
-      memwalAccountId: user?.delegateAccountId ?? process.env.MEMWAL_ACCOUNT_ID ?? null,
-    };
-  } catch {
-    return {
-      memwalKey: process.env.MEMWAL_PRIVATE_KEY ?? null,
-      memwalAccountId: process.env.MEMWAL_ACCOUNT_ID ?? null,
-    };
+/** Ensure the single local user row exists (notes.userId FKs to it). Runs once per process. */
+let ensureUserPromise: Promise<void> | null = null;
+function ensureLocalUser() {
+  if (!ensureUserPromise) {
+    ensureUserPromise = db
+      .insert(users)
+      .values({
+        id: LOCAL_USER_ID,
+        suiAddress: "local-dev",
+        authMethod: "enoki",
+        name: "Local User"
+      })
+      .onConflictDoNothing({ target: users.id })
+      .then(() => undefined)
+      .catch((err) => {
+        // Reset so a transient failure can retry on the next request.
+        ensureUserPromise = null;
+        throw err;
+      });
   }
+  return ensureUserPromise;
 }
 
 export const createContext = async (
-  opts: FetchCreateContextFnOptions
+  _opts: FetchCreateContextFnOptions
 ): Promise<Context> => {
-  const noAuth: Context = { db, userId: null, memwalKey: null, memwalAccountId: null };
-  const sessionId = getSessionIdFromRequest(opts.req);
-  if (!sessionId) return noAuth;
-
-  // Try zkLogin session first
-  const [zkSession] = await db
-    .select()
-    .from(zkLoginSessions)
-    .where(eq(zkLoginSessions.id, sessionId))
-    .limit(1);
-
-  if (zkSession?.userId && zkSession.expiresAt > new Date()) {
-    const keys = await loadUserMemwalKey(zkSession.userId);
-    return { db, userId: zkSession.userId, ...keys };
-  }
-
-  // Try wallet/enoki session
-  const [walletSession] = await db
-    .select()
-    .from(walletSessions)
-    .where(eq(walletSessions.id, sessionId))
-    .limit(1);
-
-  if (walletSession?.userId && walletSession.expiresAt > new Date()) {
-    const keys = await loadUserMemwalKey(walletSession.userId);
-    return { db, userId: walletSession.userId, ...keys };
-  }
-
-  return noAuth;
+  await ensureLocalUser();
+  return {
+    db,
+    userId: LOCAL_USER_ID,
+    memwalKey: process.env.MEMWAL_PRIVATE_KEY ?? null,
+    memwalAccountId: process.env.MEMWAL_ACCOUNT_ID ?? null
+  };
 };
 
 const t = initTRPC.context<Context>().create({
-  transformer: superjson,
+  transformer: superjson
 });
 
 export const router = t.router;
 export const procedure = t.procedure;
 
 /**
- * Protected procedure that requires authentication.
- * Throws UNAUTHORIZED if no valid session.
+ * Protected procedure. In single-user local mode there is always a user, but
+ * we keep the guard so route code stays unchanged.
  */
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (!ctx.userId) {
     throw new TRPCError({
       code: "UNAUTHORIZED",
-      message: "Authentication required",
+      message: "Authentication required"
     });
   }
 
   return next({
     ctx: {
       ...ctx,
-      userId: ctx.userId,
-    },
+      userId: ctx.userId
+    }
   });
 });

@@ -76,23 +76,6 @@ type SaveNoteButtonProps = {
   onSaveToDb: (content: SerializedEditorState, plainText: string) => Promise<void>;
 };
 
-const SESSION_STORAGE_KEY = "zklogin:session:id";
-
-function getSessionId(): string | null {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-
-    const outer = JSON.parse(raw);
-    const sessionData = outer?.value ?? outer;
-    return sessionData?.sessionId ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function readEditorContent(editorState: EditorState) {
   let plainText = "";
   editorState.read(() => {
@@ -119,12 +102,10 @@ function SaveNoteButton({ onSaveToDb }: SaveNoteButtonProps) {
       if (plainText.trim().length >= 10) {
         setStatus("analyzing");
 
-        const sessionId = getSessionId();
         const res = await fetch("/api/memory/remember", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(sessionId ? { "x-session-id": sessionId } : {}),
           },
           body: JSON.stringify({ text: plainText }),
         });

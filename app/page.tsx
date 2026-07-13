@@ -1,6 +1,5 @@
 "use client";
 
-import { AuthButtonGroup, useAuth } from "@/feature/auth";
 import { MarketingBorder } from "@/package/shared/components/border";
 import { Button } from "@/shared/components/ui/button";
 import { motion } from "framer-motion";
@@ -8,8 +7,6 @@ import Image from "next/image";
 import Link from "next/link";
 
 export default function Home() {
-  const { isAuthenticated, isLoading } = useAuth();
-
   return (
     <main className="relative overflow-hidden">
       <motion.div
@@ -56,29 +53,16 @@ export default function Home() {
               AI-powered note-taking on Sui blockchain
             </motion.p>
 
-            {isAuthenticated && (
-              <motion.div
-                className="mt-8"
-                initial={{ opacity: 0, scale: 0 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-              >
-                <Button asChild size="lg">
-                  <Link href="/note">Take Notes</Link>
-                </Button>
-              </motion.div>
-            )}
-
-            {!isAuthenticated && !isLoading && (
-              <motion.div
-                className="mt-8"
-                initial={{ opacity: 0, scale: 0 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-              >
-                <AuthButtonGroup />
-              </motion.div>
-            )}
+            <motion.div
+              className="mt-8"
+              initial={{ opacity: 0, scale: 0 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+            >
+              <Button asChild size="lg">
+                <Link href="/note">Take Notes</Link>
+              </Button>
+            </motion.div>
           </motion.div>
         </main>
       </div>
